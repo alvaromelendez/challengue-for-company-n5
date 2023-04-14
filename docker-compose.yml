@@ -1,0 +1,111 @@
+  
+version: '3'
+services:
+  challenge.backend.lt.api:
+    image: ${DOCKER_REGISTRY-}challenge.backend.lt.api
+    build:
+      context: .
+      dockerfile: src/Permission.Api/Dockerfile
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__PermissionDbContext=${DB:-Server=mssql;Database=PermissionDb;User Id=sa;Password=Pass@word;Encrypt=False;TrustServerCertificate=true;}
+      - ElasticConfig__Url=http://elasticsearch:9200
+      - Kafka__ProducerSettings__BootstrapServers=broker:9092
+      - Kafka__ConsumerSettings__BootstrapServers=broker:9092
+    ports:
+      - "80:80"
+    depends_on:
+      - mssql
+      - broker
+      - elasticsearch
+    networks:
+      - challenge
+
+  mssql:
+    image: "mcr.microsoft.com/azure-sql-edge:latest"
+    ports:
+      - 1433:1433
+    environment:
+        SA_PASSWORD: "Pass@word"
+        ACCEPT_EULA: "Y"
+    volumes:
+      - sqldata1:/var/opt/mssql
+    networks:
+      - challenge
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.5
+    ports:
+      - 9200:9200
+      - 9300:9300
+    environment:
+      - cluster.name=docker-cluster
+      - bootstrap.memory_lock=true
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - ELASTIC_PASSWORD=password
+      - xpack.security.enabled=true
+    volumes:
+      - dataes:/usr/share/elasticsearch/data
+    networks:
+      - challenge
+    restart: always
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.17.5
+    ports:
+      - 5601:5601
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=password
+    volumes:
+      - dataki:/usr/share/kibana/data
+    depends_on:
+      - elasticsearch
+    networks:
+      - challenge
+    restart: always
+
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: zookeeper
+    ports:
+      - "2180:2180"
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - challenge
+  broker:
+    image: confluentinc/cp-kafka:latest
+    container_name: broker
+    ports:
+    # To learn about configuring Kafka for access across networks see
+    # https://www.confluent.io/blog/kafka-client-cannot-connect-to-broker-on-aws-on-docker-etc/
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://broker:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    networks:
+      - challenge
+
+volumes:
+  sqldata1:
+    external: false
+  dataes:
+    driver: local
+  dataki:
+    driver: local
+
+networks:
+  challenge:
+    driver: bridge
